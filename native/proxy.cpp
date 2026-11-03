@@ -94,7 +94,8 @@ API void HUD_Shutdown() {
     if(fn) fn();
 }
 API int HUD_Key_Event(int down,int key,const char* binding) {
-    if(key==K_INS || bridge::menuOpen()) return 0;
+    if(key==K_INS) { bridge::insertKey(down!=0); return 0; }
+    if(bridge::menuOpen()) return 0;
     auto fn=get<HUD_KEY_EVENT_FUNC>("HUD_Key_Event",real.pKeyEvent);
     return fn?fn(down,key,binding):1;
 }

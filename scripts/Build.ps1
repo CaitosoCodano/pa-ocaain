@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param()
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -21,7 +21,7 @@ try {
     Copy-Item build/windows/Release/client.dll dist/client.dll -Force
     $check = Start-Process -FilePath (Join-Path $root 'dist/ocaain-menu/Ocaain.Menu.exe') -ArgumentList '--self-test' -Wait -PassThru
     if ($check.ExitCode -ne 0) { throw 'WinForms self-test failed. See dist/ocaain-menu/self-test-results.json.' }
-    Copy-Item scripts/Install.ps1, scripts/Uninstall.ps1, README.md -Destination dist -Force
+    Copy-Item scripts/Install.ps1, scripts/Uninstall.ps1, scripts/Diagnose.ps1, README.md, VERSION.txt -Destination dist -Force
     Copy-Item third_party/*.txt -Destination dist -Force
     Write-Host 'Build concluído em dist/. Consulte README.md antes de instalar.'
 }

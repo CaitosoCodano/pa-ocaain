@@ -1,6 +1,8 @@
 #include "bridge.h"
 #include "protocol.h"
 #include "aim_math.h"
+#include "menu_input.h"
+#include "game_window.h"
 #include <GL/gl.h>
 #include <array>
 #include <algorithm>
@@ -8,6 +10,8 @@
 #include <string>
 #include <vector>
 #include <limits>
+#include <cstdio>
+#include <cstdarg>
 
 extern "C" void IN_ActivateMouse();
 extern "C" void IN_DeactivateMouse();
@@ -28,6 +32,9 @@ int drawingPlayer{};
 GLuint texture{};
 std::int32_t uploadedSequence{-1};
 bool open{}, connected{}, canAim{};
+InsertKey insertState;
+DWORD lastDrawTick{};
+bool lastUiAlive{};
 Vec eye{}, punch{};
 int screenW{}, screenH{};
 int menuX{}, menuY{}, menuW{MenuWidth}, menuH{MenuHeight};
@@ -44,6 +51,25 @@ struct Sample {
 };
 std::array<Sample,33> samples{};
 
+void diagnostic(const char* format,...) {
+    char message[1024]{};
+    va_list args; va_start(args,format);
+    std::vsnprintf(message,sizeof(message),format,args);
+    va_end(args);
+    if(engine.pfnConsolePrint) engine.pfnConsolePrint(message);
+    wchar_t directory[MAX_PATH]{};
+    const DWORD length=GetTempPathW(MAX_PATH,directory);
+    if(!length || length>=MAX_PATH) return;
+    const std::wstring path=std::wstring(directory)+L"Ocaain.Native-"+
+        std::to_wstring(GetCurrentProcessId())+L".log";
+    HANDLE file=CreateFileW(path.c_str(),FILE_APPEND_DATA,FILE_SHARE_READ|FILE_SHARE_WRITE,
+        nullptr,OPEN_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);
+    if(file==INVALID_HANDLE_VALUE) return;
+    DWORD written{};
+    WriteFile(file,message,static_cast<DWORD>(std::strlen(message)),&written,nullptr);
+    CloseHandle(file);
+}
+
 LONG read(volatile std::int32_t& value) {
     return InterlockedCompareExchange(reinterpret_cast<volatile LONG*>(&value),0,0);
 }
@@ -55,6 +81,19 @@ bool uiAlive() {
         static_cast<DWORD>(GetTickCount()-static_cast<DWORD>(read(shared->uiTick))) < 1500;
 }
 int features() { return uiAlive()?read(shared->features):0; }
+void status() {
+    DWORD exitCode=STILL_ACTIVE;
+    const bool process=uiProcess && GetExitCodeProcess(uiProcess,&exitCode);
+    char name[128]{};
+    if(window) GetClassNameA(window,name,sizeof(name));
+    diagnostic("Ocaain v0.2-menu-fix: map=%d window=%d class=%s hook=%d ui_ready=%d menu=%d render_seen=%d render_age_ms=%lu\n",
+        connected,window!=nullptr,name,previousProc!=nullptr,uiAlive(),open,
+        lastDrawTick!=0,
+        static_cast<unsigned long>(lastDrawTick?GetTickCount()-lastDrawTick:0));
+    if(process) diagnostic("Ocaain: menu_process=%s exit_code=%lu\n",
+        exitCode==STILL_ACTIVE?"running":"stopped",static_cast<unsigned long>(exitCode));
+    else diagnostic("Ocaain: menu_process=not_started\n");
+}
 void setOpen(bool value) {
     if(open==value) return;
     open=value;
@@ -170,23 +209,16 @@ int drawPlayer(int flags,entity_state_t* state) {
     drawingPlayer=0;
     return result;
 }
-BOOL CALLBACK findWindow(HWND hwnd,LPARAM) {
-    DWORD pid{};
-    GetWindowThreadProcessId(hwnd,&pid);
-    char name[64]{};
-    GetClassNameA(hwnd,name,sizeof(name));
-    if(pid==GetCurrentProcessId() && std::strcmp(name,"Valve001")==0 && IsWindowVisible(hwnd)) {
-        window=hwnd; return FALSE;
-    }
-    return TRUE;
-}
 LRESULT CALLBACK windowProc(HWND hwnd,UINT msg,WPARAM w,LPARAM l) {
     if(msg==WM_KEYDOWN && w==VK_INSERT) {
-        if(!(l&(1LL<<30)) && connected && uiAlive()) setOpen(!open);
+        insertKey(true);
         return 0;
     }
-    if(msg==WM_KEYUP && w==VK_INSERT) return 0;
-    if((msg==WM_KILLFOCUS || (msg==WM_ACTIVATEAPP && !w)) && open) setOpen(false);
+    if(msg==WM_KEYUP && w==VK_INSERT) { insertKey(false); return 0; }
+    if(msg==WM_KILLFOCUS || (msg==WM_ACTIVATEAPP && !w)) {
+        insertState.reset();
+        if(open) setOpen(false);
+    }
     if(open) {
         if(msg==WM_LBUTTONDOWN && shared) {
             POINT p{}; GetCursorPos(&p); ScreenToClient(hwnd,&p);
@@ -204,6 +236,29 @@ LRESULT CALLBACK windowProc(HWND hwnd,UINT msg,WPARAM w,LPARAM l) {
            (msg>=WM_KEYFIRST && msg<=WM_KEYLAST)) return 0;
     }
     return CallWindowProcW(previousProc,hwnd,msg,w,l);
+}
+void ensureWindow() {
+    if(window && previousProc && IsWindow(window)) return;
+    window=nullptr;
+    previousProc=nullptr;
+    HWND candidate=findGameWindow();
+    if(!candidate) return;
+    SetLastError(0);
+    auto previous=reinterpret_cast<WNDPROC>(SetWindowLongPtrW(candidate,GWLP_WNDPROC,
+        reinterpret_cast<LONG_PTR>(windowProc)));
+    if(!previous) {
+        const DWORD error=GetLastError();
+        static DWORD lastError{}, lastReport{};
+        if(error!=lastError || GetTickCount()-lastReport>2000) {
+            diagnostic("Ocaain: window_hook_failed error=%lu\n",static_cast<unsigned long>(error));
+            lastError=error; lastReport=GetTickCount();
+        }
+        return;
+    }
+    window=candidate;
+    previousProc=previous;
+    char name[128]{}; GetClassNameA(window,name,sizeof(name));
+    diagnostic("Ocaain: game_window_hooked class=%s\n",name);
 }
 void launchMenu() {
     HMODULE self{};
@@ -223,7 +278,8 @@ void launchMenu() {
         nullptr,nullptr,&start,&process)) {
         uiProcess=process.hProcess;
         CloseHandle(process.hThread);
-    } else engine.pfnConsolePrint("Ocaain: menu executable unavailable. All features remain disabled.\n");
+        diagnostic("Ocaain: menu_process_started pid=%lu\n",static_cast<unsigned long>(process.dwProcessId));
+    } else diagnostic("Ocaain: menu_process_start_failed error=%lu\n",static_cast<unsigned long>(GetLastError()));
 }
 bool project(Vec world,float& x,float& y) {
     float point[3]{world.x,world.y,world.z}, result[3]{};
@@ -313,23 +369,44 @@ void drawMenu() {
 }
 
 bool initialize() {
+    diagnostic("Ocaain v0.2-menu-fix: client_loaded\n");
+    static char command[]="ocaain_status";
+    engine.pfnAddCommand(command,status);
     const auto id=std::to_wstring(GetCurrentProcessId());
     const std::wstring name=L"Local\\Ocaain_"+id;
     mapping=CreateFileMappingW(INVALID_HANDLE_VALUE,nullptr,PAGE_READWRITE,0,sizeof(Shared),name.c_str());
     if(!mapping || GetLastError()==ERROR_ALREADY_EXISTS) {
+        diagnostic("Ocaain: shared_memory_create_failed error=%lu\n",static_cast<unsigned long>(GetLastError()));
         if(mapping) CloseHandle(mapping);
         mapping=nullptr; return false;
     }
     shared=static_cast<Shared*>(MapViewOfFile(mapping,FILE_MAP_ALL_ACCESS,0,0,sizeof(Shared)));
-    if(!shared) { CloseHandle(mapping); mapping=nullptr; return false; }
+    if(!shared) {
+        diagnostic("Ocaain: shared_memory_map_failed error=%lu\n",static_cast<unsigned long>(GetLastError()));
+        CloseHandle(mapping); mapping=nullptr; return false;
+    }
     std::memset(shared,0,sizeof(Shared));
     shared->magic=Magic; shared->version=1; shared->processId=GetCurrentProcessId();
     pixelMutex=CreateMutexW(nullptr,FALSE,(name+L"_Pixels").c_str());
-    if(!pixelMutex) { shutdown(); return false; }
+    if(!pixelMutex) {
+        diagnostic("Ocaain: pixel_mutex_create_failed error=%lu\n",static_cast<unsigned long>(GetLastError()));
+        shutdown(); return false;
+    }
     launchMenu();
     return true;
 }
 bool menuOpen() { return open; }
+void insertKey(bool down) {
+    if(!insertState.update(down)) return;
+    ensureWindow();
+    if(!connected || !window || !uiAlive()) {
+        diagnostic("Ocaain: insert_received_but_not_ready\n");
+        status();
+        return;
+    }
+    setOpen(!open);
+    diagnostic("Ocaain: insert_menu=%s\n",open?"open":"closed");
+}
 void reset() {
     samples={}; dead={}; canAim=false;
 }
@@ -353,19 +430,17 @@ void studio(engine_studio_api_t* api,r_studio_interface_t** iface) {
     }
 }
 void frame() {
-    if(!window) {
-        EnumWindows(findWindow,0);
-        if(window) {
-            SetLastError(0);
-            previousProc=reinterpret_cast<WNDPROC>(SetWindowLongPtrW(window,GWLP_WNDPROC,reinterpret_cast<LONG_PTR>(windowProc)));
-            if(!previousProc) window=nullptr;
-        }
-    }
+    ensureWindow();
     const char* level=engine.pfnGetLevelName();
     const bool wasConnected=connected;
     connected=level && *level && engine.GetLocalPlayer();
     if(!connected && wasConnected) { reset(); teams={}; }
     if(shared) write(shared->gameTick,static_cast<LONG>(GetTickCount()));
+    const bool alive=uiAlive();
+    if(alive!=lastUiAlive) {
+        diagnostic("Ocaain: menu_renderer=%s\n",alive?"ready":"not_ready");
+        lastUiAlive=alive;
+    }
     if(open && (!connected || !uiAlive() || GetForegroundWindow()!=window)) setOpen(false);
     if(!uiAlive() && shared) write(shared->features,0);
 }
@@ -401,6 +476,8 @@ void move(usercmd_t* cmd,int active) {
     if(shared) write(shared->target,target);
 }
 void draw() {
+    ensureWindow();
+    if(wglGetCurrentContext()) lastDrawTick=GetTickCount();
     if(!connected || !window || GetForegroundWindow()!=window || !engine.pTriAPI || !wglGetCurrentContext()) return;
     SCREENINFO info{}; info.iSize=sizeof(info);
     if(!engine.pfnGetScreenInfo(&info) || info.iWidth<=0 || info.iHeight<=0) return;

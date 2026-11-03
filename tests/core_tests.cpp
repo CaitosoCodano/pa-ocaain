@@ -1,5 +1,6 @@
 #include "aim_math.h"
 #include "protocol.h"
+#include "menu_input.h"
 #include <cstdlib>
 #include <iostream>
 #include <limits>
@@ -33,5 +34,12 @@ int main() {
     check(!enemy(1,2,1,2,false,true), "dead rejected");
     check(!enemy(1,2,1,2,true,false), "stale rejected");
     check(offsetof(Shared,pixels)==64 && sizeof(Shared)==729664, "IPC layout");
+    InsertKey key;
+    check(key.update(true), "first Insert press opens menu");
+    check(!key.update(true), "repeat or duplicate callback does not close menu");
+    check(!key.update(false), "release does not toggle");
+    check(key.update(true), "second physical press toggles again");
+    key.reset();
+    check(key.update(true), "focus loss clears held key");
     std::cout << checks << " checks passed\n";
 }

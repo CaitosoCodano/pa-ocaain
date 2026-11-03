@@ -1,5 +1,8 @@
 # Downloads
 
+Versao atual: **v0.2-menu-fix**. Inclui correcao de Insert/janelas SDL e
+o arquivo `Diagnose.ps1` para investigar falhas de inicializacao do menu.
+
 - [Pacote Windows x86 — aproximadamente 62 MB](Ocaain-CS16-win-x86.zip)
 - [Código-fonte compactado](Ocaain-CS16-source.zip)
 - [Hashes SHA-256](SHA256SUMS.txt)

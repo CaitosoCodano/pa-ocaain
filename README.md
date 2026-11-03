@@ -6,7 +6,7 @@ não abre uma janela sobre a área de trabalho. Insert abre/fecha o menu dentro
 de um mapa; somente as caixas de seleção controlam aimbot, boxes e skeleton.
 Todos começam desativados. O botão **Desativar tudo** limpa as três opções.
 
-**Estado:** DLL x86 e menu compilados em Linux; 17 verificações do núcleo passaram.
+**Estado:** DLL x86 e menu compilados em Linux; 22 verificações do núcleo passaram.
 Outras 12 verificações de instalação/restauração passaram com arquivos temporários.
 Não houve execução no Windows nem no CS 1.6. A compatibilidade e o comportamento
 na build Steam **10210, protocolo 48, 1.1.2.7/Stdio** informada ainda precisam
@@ -65,8 +65,11 @@ Esse autoteste foi escrito, mas não executado neste ambiente Linux.
 2. Execute, ajustando o caminho da biblioteca Steam:
 
    ```powershell
-   .\scripts\Install.ps1 -GameDirectory 'C:\Program Files (x86)\Steam\steamapps\common\Half-Life'
+   .\Install.ps1 -GameDirectory 'C:\Program Files (x86)\Steam\steamapps\common\Half-Life'
    ```
+
+   Esse comando vale para a pasta extraída do ZIP pronto. No checkout do
+   código-fonte, use `scripts/Install.ps1` depois de compilar.
 
 3. Nas propriedades do jogo na Steam, adicione `-insecure -gl` às opções de
    inicialização. Mantenha tela cheia nas configurações de vídeo.
@@ -79,7 +82,7 @@ e registra os hashes SHA-256. Ela não sobrescreve backups existentes. Para
 atualizar este projeto instalado, desinstale antes e instale o novo pacote.
 
 ```powershell
-.\scripts\Uninstall.ps1 -GameDirectory 'C:\Program Files (x86)\Steam\steamapps\common\Half-Life'
+.\Uninstall.ps1 -GameDirectory 'C:\Program Files (x86)\Steam\steamapps\common\Half-Life'
 ```
 
 Depois de restaurar, remova `-insecure` se quiser o cliente padrão novamente.
@@ -103,9 +106,39 @@ Este roteiro requer Windows e a build 10210 instalada. Ainda não foi executado:
 6. Finalize o processo do menu: todos os recursos devem parar em até 1,5 s.
 7. Feche o jogo, desinstale e confira o hash da DLL original restaurada.
 
-Se o menu não abrir, procure `Ocaain: menu executable unavailable` no console
+Se o menu não abrir, procure `Ocaain: menu_process_start_failed` no console
 do jogo ou `%TEMP%\Ocaain.Menu-<PID>.log`. Confirme `-insecure -gl`, o diretório
 `cstrike/cl_dlls/ocaain-menu/` completo e se existe uma partida carregada.
+
+## Insert não abre o menu
+
+O pacote **v0.2-menu-fix** corrige a busca de janela restrita a `Valve001`:
+agora usa o drawable OpenGL e também reconhece janelas SDL e outras classes
+do próprio processo. Insert também é tratado no callback de teclado do
+GoldSrc, com proteção contra repetição. Essas correções foram compiladas,
+mas ainda precisam de validação no CS 1.6/Windows.
+O renderizador também permanece ativo durante carregamentos demorados: uma
+pausa nos callbacks do motor não é mais confundida com o encerramento do jogo.
+
+Para atualizar, feche o jogo e execute `Uninstall.ps1` na pasta extraída. Só
+depois da mensagem de restauração bem-sucedida execute `Install.ps1` do novo
+pacote. Não apague o backup manualmente.
+
+Se não abrir, deixe uma partida carregada e execute na pasta do pacote:
+
+```powershell
+.\Diagnose.ps1 -GameDirectory 'C:\Program Files (x86)\Steam\steamapps\common\Half-Life'
+```
+
+O diagnóstico confere os arquivos, os processos, apenas a presença dos
+parâmetros `-insecure`/`-gl` e os módulos do cliente. Também testa separadamente
+o renderizador Forms, capturando erros de inicialização do runtime. Não altera
+os arquivos do jogo. Copie o resultado ao reportar um problema.
+
+No console do jogo, `ocaain_status` mostra se o cliente atualizado carregou,
+se encontrou a janela e se o renderizador está pronto. Se o comando for
+desconhecido, isso indica que o cliente atualizado não está ativo nessa
+instância. Logs da DLL ficam em `%TEMP%\Ocaain.Native-<PID>.log`.
 
 ## Estrutura e testes
 

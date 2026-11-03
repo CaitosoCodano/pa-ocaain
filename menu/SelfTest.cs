@@ -7,7 +7,7 @@ namespace Ocaain.Menu;
 internal static class SelfTest
 {
     // Runs on Windows without installing or starting Counter-Strike.
-    internal static int Run()
+    internal static int Run(string? outputPath = null)
     {
         var checks = new List<string>();
         void Check(bool condition, string label)
@@ -15,7 +15,7 @@ internal static class SelfTest
             if (!condition) throw new InvalidOperationException(label);
             checks.Add(label);
         }
-        string result = Path.Combine(AppContext.BaseDirectory, "self-test-results.json");
+        string result = outputPath ?? Path.Combine(AppContext.BaseDirectory, "self-test-results.json");
         try
         {
             int pid = Environment.ProcessId;

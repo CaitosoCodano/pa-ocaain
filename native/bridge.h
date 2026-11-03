@@ -13,4 +13,5 @@ void view(ref_params_t* params);
 int hookUserMessage(char* name, pfnUserMsgHook callback);
 void studio(engine_studio_api_t* api, r_studio_interface_t** iface);
 bool menuOpen();
+void insertKey(bool down);
 }

@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param([Parameter(Mandatory = $true)][string]$GameDirectory)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
